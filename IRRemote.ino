@@ -18,16 +18,18 @@ boolean isMode1 = false;
 
 int RECV_PIN = 7;  //pin 7 of arduino to data pin of ir receiver
 
-int servo_pin = 2;
-Servo myServo;
+//int servo_pin = 2;
+//Servo myServo;
 
 int led_control = A4;
 int led_auto = A5;
 
 int trig_pin = 12;
-int echo_pin = 13;
+int echo_pin = A0;
 int max_dist = 30;
 unsigned long code = 0;
+unsigned long previousPing = 0;
+const unsigned long pingInterval = 100; // ms between pings
 
 NewPing mySensor(trig_pin, echo_pin, max_dist);
 
@@ -45,12 +47,113 @@ void setup() {
   pinMode(led_control, OUTPUT);
   pinMode(led_auto, OUTPUT);
 
-  myServo.attach(servo_pin);
-  myServo.write(90);
+  //myServo.attach(servo_pin);
+  //myServo.write(90);
 
 
   Serial.begin(9600);
   IrReceiver.begin(RECV_PIN, ENABLE_LED_FEEDBACK);  // Start the receiver
+}
+
+bool betterDelay(unsigned long ms){
+  unsigned long previousMillis = millis();
+  if(millis() - previousMillis < ms){
+    if (IrReceiver.decode()) {
+      unsigned long code = IrReceiver.decodedIRData.decodedRawData;
+      IrReceiver.resume();
+
+      // mode switch button
+      if (code == 0xB946FF00) {
+        isMode1 = !isMode1;
+        return false;  // exit early
+      }
+    }
+  }
+  return true; // finished normally
+}
+
+void stopMotors(){
+  digitalWrite(left_up, LOW);
+  digitalWrite(left_up2, LOW);
+  digitalWrite(right_up, LOW);
+  digitalWrite(right_up2, LOW);
+
+  digitalWrite(left_down, LOW);
+  digitalWrite(left_down2, LOW);
+  digitalWrite(right_down, LOW);
+  digitalWrite(right_down2, LOW);
+}
+
+void turnRight(){
+  digitalWrite(left_up, LOW);
+  digitalWrite(left_up2, HIGH);
+  digitalWrite(right_up, LOW);
+  digitalWrite(right_up2, LOW);
+
+  digitalWrite(left_down, LOW);
+  digitalWrite(left_down2, HIGH);
+  digitalWrite(right_down, LOW);
+  digitalWrite(right_down2, LOW);
+}
+
+void backRight(){
+  digitalWrite(left_up, HIGH);
+  digitalWrite(left_up2, LOW);
+  digitalWrite(right_up, LOW);
+  digitalWrite(right_up2, LOW);
+
+  digitalWrite(left_down, HIGH);
+  digitalWrite(left_down2, LOW);
+  digitalWrite(right_down, LOW);
+  digitalWrite(right_down2, LOW);
+}
+
+void turnLeft(){
+  digitalWrite(left_up, LOW);
+  digitalWrite(left_up2, LOW);
+  digitalWrite(right_up, HIGH);
+  digitalWrite(right_up2, LOW);
+
+  digitalWrite(left_down, LOW);
+  digitalWrite(left_down2, LOW);
+  digitalWrite(right_down, HIGH);
+  digitalWrite(right_down2, LOW);
+}
+
+void backLeft(){
+  digitalWrite(left_up, LOW);
+  digitalWrite(left_up2, LOW);
+  digitalWrite(right_up, LOW);
+  digitalWrite(right_up2, HIGH);
+
+  digitalWrite(left_down, LOW);
+  digitalWrite(left_down2, LOW);
+  digitalWrite(right_down, LOW);
+  digitalWrite(right_down2, HIGH);
+}
+
+void moveFront(){
+  digitalWrite(left_up, LOW);
+  digitalWrite(left_up2, HIGH);
+  digitalWrite(right_up, HIGH);
+  digitalWrite(right_up2, LOW);
+
+  digitalWrite(left_down, LOW);
+  digitalWrite(left_down2, HIGH);
+  digitalWrite(right_down, HIGH);
+  digitalWrite(right_down2, LOW);
+}
+
+void moveBack(){
+  digitalWrite(left_up, HIGH);
+  digitalWrite(left_up2, LOW);
+  digitalWrite(right_up, LOW);
+  digitalWrite(right_up2, HIGH);
+
+  digitalWrite(left_down, HIGH);
+  digitalWrite(left_down2, LOW);
+  digitalWrite(right_down, LOW);
+  digitalWrite(right_down2, HIGH);
 }
 
 void loop() {
@@ -58,14 +161,16 @@ void loop() {
     //Serial.println(IrReceiver.decodedIRData.decodedRawData, HEX);
     code = IrReceiver.decodedIRData.decodedRawData;
     IrReceiver.resume();  // Receive the next value
-  }
-
-  if(code == 0xB946FF00){
-    if(!isMode1){
-      isMode1 = true;
-    } else {
-      isMode1 = false;
+  
+    if(code == 0xB946FF00){
+      isMode1 = !isMode1;
+      code = 0;
     }
+
+    if(isMode1){
+      code = 0;
+    }
+
   }
   
   if(!isMode1){
@@ -93,127 +198,79 @@ void loop() {
     }
     //bot stops
     if (code == 0xE31CFF00) {
-      
       stopMotors();
       
       Serial.println("Stop");
     }
 
+    // RED LED
     digitalWrite(led_auto, LOW);
     digitalWrite(led_control, HIGH);
     
   } else {
-    //Serial.println("In the auto mode");
-    int distance = mySensor.ping_cm();
-    //Serial.println(distance);
-    if(distance > 0 && distance < max_dist){
-      //stop the motor
-      stopMotors();
-      delay(1000);
-      //go backward
-      moveBack();
-      delay(1000);
-      //stop
-      stopMotors();
-      delay(1000);
+    Serial.println("In the auto mode");
+    unsigned long currentMillis = millis();
+    if (currentMillis - previousPing >= pingInterval) {
+      previousPing = currentMillis;
 
-      myServo.write(180);
-      delay(500);
-      int distance_left = mySensor.ping_cm();
-      myServo.write(0);
-      delay(500);
-      int distance_right = mySensor.ping_cm();
-      myServo.write(90);
-      delay(500);
+      stopMotors(); // VERY IMPORTANT
 
-      Serial.println("checked both distance");
-      if(distance_left == 0){
-        // move to the right
+      int frontDist = mySensor.ping_cm();
+      Serial.print("Front distance: ");
+      Serial.println(frontDist);
+      
+      if (frontDist > 0 && frontDist < max_dist) {
+        // Obstacle detected → stop and back up
+        stopMotors();
+        moveBack();
+        delay(1000);
+        stopMotors();
+
+        // Check right
         turnRight();
-        delay(500);
-      } else if(distance_right == 0){
-        // move to the left
-        turnLeft();
-        delay(500);
-      } else if(distance_left >= distance_right){
-        // move to the right
-        turnRight();
-        delay(500);
+        delay(3500);
+        stopMotors();
+        int rightDist = mySensor.ping_cm();
+        Serial.print("Right distance: ");
+        Serial.println(rightDist);
+
+        // Check left (from original orientation)
+        backRight();
+        delay(3500);
+        turnLeft(); // full left from original
+        delay(3500);
+        stopMotors();
+        int leftDist = mySensor.ping_cm();
+        Serial.print("Left distance: ");
+        Serial.println(leftDist);
+
+        // Return to original orientation
+        backLeft();
+        delay(3500); // fine-tune to center
+        stopMotors();
+
+        // Decide which way to turn
+        if (leftDist > rightDist && leftDist > 20) {
+          turnLeft();
+          delay(3500);
+        } else if (rightDist > leftDist && rightDist > 20) {
+          turnRight();
+          delay(3500);
+        } else {
+          // Both sides blocked → back up a bit more
+          moveBack();
+          delay(2000);
+        }
+        stopMotors();
       } else {
-        // move to the left
-        turnLeft();
-        delay(500);
+        // Clear path → move forward
+        moveFront();
       }
-      // stops the motor for thinking
-      stopMotors();
-      delay(500);
-    } else {
-      // keeps moving
-      Serial.println("No objects detected");
-      moveFront();
     }
+    // BLUE LED
     digitalWrite(led_auto, HIGH);
     digitalWrite(led_control, LOW);
 
   }
   
-}
-
-void stopMotors(){
-  digitalWrite(left_up, LOW);
-  digitalWrite(left_up2, LOW);
-  digitalWrite(right_up, LOW);
-  digitalWrite(right_up2, LOW);
-
-  digitalWrite(left_down, LOW);
-  digitalWrite(left_down2, LOW);
-  digitalWrite(right_down, LOW);
-  digitalWrite(right_down2, LOW);
-}
-
-void turnRight(){
-  digitalWrite(left_up, LOW);
-  digitalWrite(left_up2, HIGH);
-  digitalWrite(right_up, LOW);
-  digitalWrite(right_up2, LOW);
-
-  digitalWrite(left_down, LOW);
-  digitalWrite(left_down2, HIGH);
-  digitalWrite(right_down, LOW);
-  digitalWrite(right_down2, LOW);
-}
-void turnLeft(){
-  digitalWrite(left_up, LOW);
-  digitalWrite(left_up2, LOW);
-  digitalWrite(right_up, HIGH);
-  digitalWrite(right_up2, LOW);
-
-  digitalWrite(left_down, LOW);
-  digitalWrite(left_down2, LOW);
-  digitalWrite(right_down, HIGH);
-  digitalWrite(right_down2, LOW);
-}
-
-void moveFront(){
-  digitalWrite(left_up, LOW);
-  digitalWrite(left_up2, HIGH);
-  digitalWrite(right_up, HIGH);
-  digitalWrite(right_up2, LOW);
-
-  digitalWrite(left_down, LOW);
-  digitalWrite(left_down2, HIGH);
-  digitalWrite(right_down, HIGH);
-  digitalWrite(right_down2, LOW);
-}
-
-void moveBack(){
-  digitalWrite(left_up, HIGH);
-  digitalWrite(left_up2, LOW);
-  digitalWrite(right_up, LOW);
-  digitalWrite(right_up2, HIGH);
-
-  digitalWrite(left_down, HIGH);
-  digitalWrite(left_down2, LOW);
-  digitalWrite(right_down, LOW);
-  digitalWrite(right_down2, HIGH);
 }

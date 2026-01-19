@@ -2,6 +2,21 @@
 #include <Servo.h>
 #include <NewPing.h>
 
+// State machines
+
+enum RobotMode{control_mode, auto_mode};
+
+enum ControlMode{control_idle, control_forward, control_backward, control_right, control_left};
+
+enum AutoMode{auto_forward, auto_backward, auto_check_left, auto_check_right, auto_recenter_right, auto_recenter_left, auto_decide};
+
+RobotMode mode = control_mode;
+
+ControlMode ctrlState = control_idle;
+
+AutoMode autoState = auto_forward;
+
+// Pins
 int left_up = 8;    //pin 8 of arduino to pin 7 of l293d 
 int left_up2 = 9;   //pin 9 of arduino to pin 2 of l293d backward pin
 int right_up = 11;   //pin 11 of arduino to pin 10 of l293d
@@ -14,12 +29,7 @@ int left_down2 = 5;
 int right_down = 4;
 int right_down2 = 3;
 
-boolean isMode1 = false;
-
 int RECV_PIN = 7;  //pin 7 of arduino to data pin of ir receiver
-
-//int servo_pin = 2;
-//Servo myServo;
 
 int led_control = A4;
 int led_auto = A5;
@@ -27,49 +37,45 @@ int led_auto = A5;
 int trig_pin = 12;
 int echo_pin = A0;
 int max_dist = 30;
+
+// Global Variables
 unsigned long code = 0;
-unsigned long previousPing = 0;
-const unsigned long pingInterval = 100; // ms between pings
+
+unsigned long stateStartTime = 0;
+unsigned long lastToggleTime = 0;
+
+int frontDist = 0;
+int leftDist = 0;
+int rightDist = 0;
 
 NewPing mySensor(trig_pin, echo_pin, max_dist);
 
-void setup() {
-  pinMode(left_up, OUTPUT);
-  pinMode(left_up2, OUTPUT);
-  pinMode(right_up, OUTPUT);
-  pinMode(right_up2, OUTPUT);
+void handleIR(){
+  if(!IrReceiver.decode()) return;
+  //Serial.println(IrReceiver.decodedIRData.decodedRawData, HEX);
+  code = IrReceiver.decodedIRData.decodedRawData;
+  IrReceiver.resume();  // Receive the next value
 
-  pinMode(left_down, OUTPUT);
-  pinMode(left_down2, OUTPUT);
-  pinMode(right_down, OUTPUT);
-  pinMode(right_down2, OUTPUT);
-
-  pinMode(led_control, OUTPUT);
-  pinMode(led_auto, OUTPUT);
-
-  //myServo.attach(servo_pin);
-  //myServo.write(90);
-
-
-  Serial.begin(9600);
-  IrReceiver.begin(RECV_PIN, ENABLE_LED_FEEDBACK);  // Start the receiver
-}
-
-bool betterDelay(unsigned long ms){
-  unsigned long previousMillis = millis();
-  if(millis() - previousMillis < ms){
-    if (IrReceiver.decode()) {
-      unsigned long code = IrReceiver.decodedIRData.decodedRawData;
-      IrReceiver.resume();
-
-      // mode switch button
-      if (code == 0xB946FF00) {
-        isMode1 = !isMode1;
-        return false;  // exit early
-      }
+  if(code == 0xB946FF00 && millis() - lastToggleTime > 800){
+    if(mode == control_mode){
+      mode = auto_mode;
+    } else {
+      mode = control_mode;
     }
+
+    ctrlState = control_idle;
+    autoState = auto_forward;
+    lastToggleTime = millis();
+    code = 0;
+    return;
   }
-  return true; // finished normally
+
+  if(mode != control_mode){
+    code = 0;
+    return;
+  }
+
+  //code = 0;
 }
 
 void stopMotors(){
@@ -156,121 +162,174 @@ void moveBack(){
   digitalWrite(right_down2, HIGH);
 }
 
-void loop() {
-  if (IrReceiver.decode()) {
-    //Serial.println(IrReceiver.decodedIRData.decodedRawData, HEX);
-    code = IrReceiver.decodedIRData.decodedRawData;
-    IrReceiver.resume();  // Receive the next value
-  
-    if(code == 0xB946FF00){
-      isMode1 = !isMode1;
-      code = 0;
-    }
-
-    if(isMode1){
-      code = 0;
-    }
-
-  }
-  
-  if(!isMode1){
+void ControlModeFSM(){
   Serial.println("In the control mode");
-  
-  //bot moves front
-    if (code == 0xE718FF00) {
-      moveFront();
-      Serial.println("Front");
-    }
-    //bot moves back
-    if (code == 0xAD52FF00) {
-      moveBack();
-      Serial.println("Back");
-    }
-    //bot moves left
-    if (code == 0xF708FF00) {
-      turnLeft();
-      Serial.println("Left");
-    }
-    //bot moves right
-    if (code == 0xA55AFF00) {
-      turnRight();
-      Serial.println("Right");
-    }
-    //bot stops
-    if (code == 0xE31CFF00) {
+
+  switch(code){
+    case 0xE718FF00:
+      ctrlState = control_forward;
+      break;
+    case 0xAD52FF00:
+      ctrlState = control_backward;
+      break;
+    case 0xF708FF00:
+      ctrlState = control_left;
+      break;
+    case 0xA55AFF00:
+      ctrlState = control_right;
+      break;
+    case 0xE31CFF00:
+      ctrlState = control_idle;
+      break;
+  }
+
+  switch(ctrlState){
+    case control_idle:
+      Serial.println("control_idle");
       stopMotors();
-      
-      Serial.println("Stop");
-    }
+      break;
+    case control_forward:
+      Serial.println("control_forward");
+      moveFront();
+      break;
+    case control_backward:
+      Serial.println("control_backward");
+      moveBack();
+      break;
+    case control_right:
+      Serial.println("control_right");
+      turnRight();
+      break;
+    case control_left:
+      Serial.println("control_left");
+      turnLeft();
+      break;
+  }
 
-    // RED LED
-    digitalWrite(led_auto, LOW);
-    digitalWrite(led_control, HIGH);
-    
-  } else {
-    Serial.println("In the auto mode");
-    unsigned long currentMillis = millis();
-    if (currentMillis - previousPing >= pingInterval) {
-      previousPing = currentMillis;
+  code = 0;
+  // RED LED
+  digitalWrite(led_auto, LOW);
+  digitalWrite(led_control, HIGH);
 
-      stopMotors(); // VERY IMPORTANT
+}
 
-      int frontDist = mySensor.ping_cm();
-      Serial.print("Front distance: ");
+void AutoModeFSM(){
+  Serial.println("In the auto mode");
+  switch(autoState){
+    case auto_forward:
+      moveFront();
+      frontDist = mySensor.ping_cm();
+      Serial.print("Front: ");
       Serial.println(frontDist);
-      
+
       if (frontDist > 0 && frontDist < max_dist) {
-        // Obstacle detected → stop and back up
         stopMotors();
-        moveBack();
-        delay(1000);
+        autoState = auto_backward;
+        stateStartTime = millis();
+      }
+      break;
+    case auto_backward:
+      moveBack();
+      if(millis() - stateStartTime > 1000){
         stopMotors();
-
-        // Check right
-        turnRight();
-        delay(3500);
+        autoState = auto_check_right;
+        stateStartTime = millis();
+      } 
+      break;
+    case auto_check_left:
+      turnLeft();
+      if(millis() - stateStartTime > 3500){
         stopMotors();
-        int rightDist = mySensor.ping_cm();
-        Serial.print("Right distance: ");
-        Serial.println(rightDist);
-
-        // Check left (from original orientation)
-        backRight();
-        delay(3500);
-        turnLeft(); // full left from original
-        delay(3500);
-        stopMotors();
-        int leftDist = mySensor.ping_cm();
+        leftDist = mySensor.ping_cm();
         Serial.print("Left distance: ");
         Serial.println(leftDist);
-
-        // Return to original orientation
-        backLeft();
-        delay(3500); // fine-tune to center
+        autoState = auto_recenter_left;
+        stateStartTime = millis();
+      } 
+      break;
+    case auto_recenter_left:
+      backLeft();
+      if(millis() - stateStartTime > 3500){
         stopMotors();
-
-        // Decide which way to turn
-        if (leftDist > rightDist && leftDist > 20) {
-          turnLeft();
-          delay(3500);
-        } else if (rightDist > leftDist && rightDist > 20) {
-          turnRight();
-          delay(3500);
-        } else {
-          // Both sides blocked → back up a bit more
-          moveBack();
-          delay(2000);
+        autoState = auto_decide;
+        stateStartTime = millis();
+      } 
+      break;
+    case auto_check_right:
+      turnRight();
+      if(millis() - stateStartTime > 3500){
+        stopMotors();
+        rightDist = mySensor.ping_cm();
+        Serial.print("Right distance: ");
+        Serial.println(rightDist);
+        autoState = auto_recenter_right;
+        stateStartTime = millis();
+      } 
+      break;
+    case auto_recenter_right:
+      backRight();
+      if(millis() - stateStartTime > 3500){
+        stopMotors();
+        autoState = auto_check_left;
+        stateStartTime = millis();
+      } 
+      break;
+    case auto_decide:
+      if (leftDist > rightDist && leftDist > 20) {
+        turnLeft();
+        if (millis() - stateStartTime > 3500) {
+          autoState = auto_forward;
+          stateStartTime = millis();
         }
-        stopMotors();
+      } else if (rightDist > leftDist && rightDist > 20) {
+        turnRight();
+        if (millis() - stateStartTime > 3500) {
+          autoState = auto_forward;
+          stateStartTime = millis();
+        }
       } else {
-        // Clear path → move forward
-        moveFront();
+        moveBack();
+        if (millis() - stateStartTime > 2000) {
+          stopMotors();
+          autoState = auto_forward;
+          stateStartTime = millis();
+        }
       }
-    }
-    // BLUE LED
-    digitalWrite(led_auto, HIGH);
-    digitalWrite(led_control, LOW);
+      break;
+  }
+  digitalWrite(led_auto, HIGH);
+  digitalWrite(led_control, LOW);
+}
 
+void setup() {
+  pinMode(left_up, OUTPUT);
+  pinMode(left_up2, OUTPUT);
+  pinMode(right_up, OUTPUT);
+  pinMode(right_up2, OUTPUT);
+
+  pinMode(left_down, OUTPUT);
+  pinMode(left_down2, OUTPUT);
+  pinMode(right_down, OUTPUT);
+  pinMode(right_down2, OUTPUT);
+
+  pinMode(led_control, OUTPUT);
+  pinMode(led_auto, OUTPUT);
+
+  Serial.begin(9600);
+  IrReceiver.begin(RECV_PIN, ENABLE_LED_FEEDBACK);  // Start the receiver
+}
+
+void loop() {
+  handleIR();
+
+  switch (mode) {
+    case control_mode:
+      ControlModeFSM();
+      break;
+
+    case auto_mode:
+      AutoModeFSM();
+      break;
   }
   
 }

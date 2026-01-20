@@ -25,3 +25,24 @@ I also used the VEX Robotic parts and DC motors from the VEX robotics.
 Here is the demonstration video:
 https://youtube.com/shorts/9i1-KxYAu2o?feature=share 
 
+How to use it:
+
+<img width="202" height="390" alt="image" src="https://github.com/user-attachments/assets/ef7fac1d-5431-48b7-a284-3116003a2237" />
+
+The picture above is the IR remote. 
+
+Here are the buttons I used to communicate with the robot:
+
+1. Button 2 is Forward
+
+2. Button 8 is Backward
+
+3. Button 6 is going Right
+
+4. Button 4 is going Left
+
+5. Button 5 stops the robot.
+
+6. Button Mode changes the mode. The mode can be changed during the auto movement of the robot as well. 
+
+

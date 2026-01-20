@@ -41,21 +41,23 @@ int max_dist = 30;
 // Global Variables
 unsigned long code = 0;
 
-unsigned long stateStartTime = 0;
-unsigned long lastToggleTime = 0;
+unsigned long stateStartTime = 0; // its the timer used for auto mode's delaying motors
+unsigned long lastToggleTime = 0;// it's the timer used for IR sensor's delaying input
 
 int frontDist = 0;
 int leftDist = 0;
 int rightDist = 0;
+int turn_diff = 10;
 
-NewPing mySensor(trig_pin, echo_pin, max_dist);
+NewPing mySensor(trig_pin, echo_pin, 100);
 
+//Recevies the signal from the IR sensor and decodes it. 
+//Depending on the signal, it switch the modes of the robot. 
 void handleIR(){
   if(!IrReceiver.decode()) return;
-  //Serial.println(IrReceiver.decodedIRData.decodedRawData, HEX);
   code = IrReceiver.decodedIRData.decodedRawData;
   IrReceiver.resume();  // Receive the next value
-
+  //This allows some delay of the signal being received
   if(code == 0xB946FF00 && millis() - lastToggleTime > 800){
     if(mode == control_mode){
       mode = auto_mode;
@@ -69,21 +71,29 @@ void handleIR(){
     code = 0;
     return;
   }
-
+  // would not change the mode automatically during the auto mode. 
   if(mode != control_mode){
     code = 0;
+    return;
+  }
+
+  if (code == 0 || code == 0xFFFFFFFF) {
     return;
   }
 
   //code = 0;
 }
 
+// following 7 functions sets the signals for the DC motor's directions 
+
 void stopMotors(){
+  // top L293D
   digitalWrite(left_up, LOW);
   digitalWrite(left_up2, LOW);
   digitalWrite(right_up, LOW);
   digitalWrite(right_up2, LOW);
 
+  // bottom L293D
   digitalWrite(left_down, LOW);
   digitalWrite(left_down2, LOW);
   digitalWrite(right_down, LOW);
@@ -163,8 +173,7 @@ void moveBack(){
 }
 
 void ControlModeFSM(){
-  Serial.println("In the control mode");
-
+  // switches the state in the control mode FSM depending on the remote's signal
   switch(code){
     case 0xE718FF00:
       ctrlState = control_forward;
@@ -185,23 +194,18 @@ void ControlModeFSM(){
 
   switch(ctrlState){
     case control_idle:
-      Serial.println("control_idle");
       stopMotors();
       break;
     case control_forward:
-      Serial.println("control_forward");
       moveFront();
       break;
     case control_backward:
-      Serial.println("control_backward");
       moveBack();
       break;
     case control_right:
-      Serial.println("control_right");
       turnRight();
       break;
     case control_left:
-      Serial.println("control_left");
       turnLeft();
       break;
   }
@@ -214,14 +218,15 @@ void ControlModeFSM(){
 }
 
 void AutoModeFSM(){
-  Serial.println("In the auto mode");
   switch(autoState){
     case auto_forward:
       moveFront();
+      //checks the distance at the front of the robot by using the ultrasonic sensor
       frontDist = mySensor.ping_cm();
       Serial.print("Front: ");
       Serial.println(frontDist);
 
+      // if the distance is more than 0 and less than 30cm. 
       if (frontDist > 0 && frontDist < max_dist) {
         stopMotors();
         autoState = auto_backward;
@@ -237,17 +242,21 @@ void AutoModeFSM(){
       } 
       break;
     case auto_check_left:
+      //moves the robot to turn left and check the distance. 
       turnLeft();
+      //equivalent to delay(3500) except it does not interrupt other devices
       if(millis() - stateStartTime > 3500){
         stopMotors();
         leftDist = mySensor.ping_cm();
         Serial.print("Left distance: ");
         Serial.println(leftDist);
+        //sets the next state for auto mode. 
         autoState = auto_recenter_left;
         stateStartTime = millis();
       } 
       break;
     case auto_recenter_left:
+      //this state is for moving the robot back to the original position from the left rotoation. 
       backLeft();
       if(millis() - stateStartTime > 3500){
         stopMotors();
@@ -267,6 +276,7 @@ void AutoModeFSM(){
       } 
       break;
     case auto_recenter_right:
+      //similar state as the auto_recenter_left but for right rotation. 
       backRight();
       if(millis() - stateStartTime > 3500){
         stopMotors();
@@ -275,19 +285,35 @@ void AutoModeFSM(){
       } 
       break;
     case auto_decide:
-      if (leftDist > rightDist && leftDist > 20) {
+      int left = 0;
+      int right = 0;
+      // if either distance is equal to 0, it means it couldn't detect any object. 
+      if(leftDist == 0){
+        left = 999;
+      } else {
+        left = leftDist;
+      }
+
+      if(rightDist == 0){
+        right = 999;
+      } else {
+        right = rightDist;
+      }
+      // if the distance difference between is greater than 10cm, the robot goes either direction. 
+      if (left > right + turn_diff) {
         turnLeft();
         if (millis() - stateStartTime > 3500) {
           autoState = auto_forward;
           stateStartTime = millis();
         }
-      } else if (rightDist > leftDist && rightDist > 20) {
+      } else if (right > left + turn_diff) {
         turnRight();
         if (millis() - stateStartTime > 3500) {
           autoState = auto_forward;
           stateStartTime = millis();
         }
       } else {
+      // otherwise, it goes back. 
         moveBack();
         if (millis() - stateStartTime > 2000) {
           stopMotors();

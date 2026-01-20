@@ -18,5 +18,10 @@ Here are the components needed:
 
 The picture below is the schematic diagram of this project. 
 In the diagram, it uses 9V battery but in the video for the demonstration, I used more batteries to move the DC motors. 
+I also used the VEX Robotic parts and DC motors from the VEX robotics. 
 
 <img width="1411" height="565" alt="image" src="https://github.com/user-attachments/assets/89378b7e-ff00-4e3e-a1b7-f6e438a5bee8" />
+
+Here is the demonstration video:
+https://youtube.com/shorts/9i1-KxYAu2o?feature=share 
+
